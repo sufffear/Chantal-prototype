@@ -5,6 +5,8 @@
   const DATA = window.ROUTE_DATA;
   const ROAD_ORDER = ['dry', 'high', 'night'];
   const ROAD_LABELS = { dry: 'Сухая', high: 'Высокая', night: 'Ночная' };
+  const CHANTAL_LABELS = { stay: 'рядом', away: 'отошла', return: 'вернулась' };
+  const RELATION_LABELS = { host: 'хозяин трактира', caravan: 'караван', woman: 'женщина с чемоданами', creatures: 'существа из переулка' };
   const KEY = 'chantal.vertical-slice.v3';
   const NEUTRAL_ID = 'n02.neutral';
 
@@ -37,6 +39,14 @@
   function choiceInNode(nodeId, choiceId) {
     const node = nodeDataById(nodeId);
     return node? node.choices.find(c => c.choiceId === choiceId): null;
+  }
+
+  /* ===== Текст сцены ===== */
+  function sceneText(node) {
+    if (node.sceneVariants && state.parentChoice && node.sceneVariants[state.parentChoice]) {
+      return node.sceneVariants[state.parentChoice];
+    }
+    return node.scene;
   }
 
   /* ===== Валидация состояния ===== */
@@ -85,6 +95,7 @@
 
   let state = loadState();
   const app = document.querySelector('#app');
+  const debugMode = new URLSearchParams(window.location.search).has('debug');
   let fallbackVisible = false;
   let neutralMode = false;   // тест-маршрут: добавить кнопку нейтралитета в узел 2
   let storageWarning = false;
@@ -181,8 +192,8 @@
     const statusLine = `
       <div class="status">
         <span>Глава 1</span><span>День ${state.day}</span><span>Эпизод ${state.episode}</span>
-        <span>Гроши: ${state.coins}</span><span>Шанталь: ${state.chantal}</span>
-        <span>Дороги: С ${state.road.dry} / В ${state.road.high} / Н ${state.road.night}</span>
+        <span>Гроши: ${state.coins}</span><span>Шанталь: ${CHANTAL_LABELS[state.chantal] || state.chantal}</span>
+        <span>Дороги: Сухая ${state.road.dry} · Высокая ${state.road.high} · Ночная ${state.road.night}</span>
       </div>`;
 
     let body;
@@ -199,7 +210,7 @@
     }
 
     app.innerHTML = `
-      <div class="eyebrow">Chantal / полный маршрут главы 1</div>
+      <div class="eyebrow">Chantal / глава 1</div>
       <section class="card">
         <h1>Три дороги и один свободный стол</h1>
         ${statusLine}
@@ -207,12 +218,12 @@
       ${body}
       <section class="card">
         <div class="actions">
-          <button type="button" data-action="reset">Сбросить тест</button>
-          <button type="button" data-action="fallback">Проверить offline fallback</button>
-          ${!state.finished && state.node === 2 &&!neutralMode? '<button type="button" data-action="neutral">Тест: нейтральный маршрут</button>': ''}
+          ${!state.finished && state.node === 2 &&!neutralMode && debugMode? '<button type="button" data-action="neutral">Держаться в стороне (нейтрально)</button>': ''}
           ${state.journal.length? '<button type="button" data-action="journal">Хроника</button>': ''}
+          ${debugMode? '<button type="button" data-action="fallback">Проверить offline fallback</button>': ''}
+          <button type="button" data-action="reset">Сбросить прохождение</button>
         </div>
-        <p class="muted">Патчи применяются по схеме chapter1-patches.json. Генерация модели не подключена.</p>
+        ${debugMode? '<p class="muted">Отладка: патчи из chapter1-patches.json, генерация модели не подключена.</p>': ''}
       </section>`;
 
     app.querySelectorAll('[data-choice]').forEach(btn => {
@@ -247,19 +258,15 @@
       const node = nodeDataById(state.node);
       if (!node) return `<section class="card"><h2>Узел ${state.node} не найден</h2></section>`;
       const available = availableChoiceIds(state.node);
-      let help = '';
-      if (state.node === 1) {
-        help = '<p class="notice">Входной узел: сначала осмотреться или потребовать объяснения. Выбор попадёт в узел 2 как parentChoiceId.</p>';
-      } else if (state.node === 2) {
-        help = '<p class="notice">Четыре варианта узла 2. Нейтральное поведение доступно как тест-маршрут кнопкой ниже.</p>';
-      } else if (state.node === 11) {
-        help = '<p class="notice">Дороги открываются по накопленным следам. Недоступные скрыты, но выход существует всегда.</p>';
-      }
+      const scene = sceneText(node);
       const buttons = available.map(id => {
         const c = choiceInNode(state.node, id);
         return `<button type="button" data-choice="${id}">${c.label}</button>`;
       }).join('');
-      return `<section class="card"><h2>Узел ${String(state.node).padStart(2, '0')}. ${node.title}</h2><p>${node.scene}</p>${help}${buttons}</section>`;
+      const heading = debugMode
+? `Узел ${String(state.node).padStart(2, '0')}. ${node.title}`
+: node.title;
+      return `<section class="card"><h2>${heading}</h2><p>${scene}</p>${buttons}</section>`;
     }
     return `<section class="card"><h2>Неизвестный узел</h2></section>`;
   }
@@ -273,19 +280,25 @@
     const continueBtn = state.node < 12
 ? '<button type="button" data-action="continue">Продолжить</button>'
 : '<button type="button" data-action="continue">Завершить главу</button>';
-    return `<section class="card"><h2>Узел ${String(state.node).padStart(2, '0')}. ${label}</h2><p>${state.consequence}</p>${chantalNote}${continueBtn}</section>`;
+    const heading = debugMode
+? `Узел ${String(state.node).padStart(2, '0')}. ${label}`
+: label;
+    return `<section class="card"><h2>${heading}</h2><p>${state.consequence}</p>${chantalNote}${continueBtn}</section>`;
   }
 
   function finalCard() {
     const bestRoad = ROAD_ORDER.reduce((best, r) => state.road[r] > state.road[best]? r: best, ROAD_ORDER[0]);
     const relations = Object.entries(state.relations)
-.map(([k, v]) => `${k}: ${v > 0? '+': ''}${v}`).join(' · ');
+.filter(([k]) => RELATION_LABELS[k])
+.map(([k, v]) => `${RELATION_LABELS[k]}: ${v > 0? '+': ''}${v}`).join(' · ');
+    const accessLine = debugMode? `<p class="muted">Доступ: ${state.access.join(', ') || 'нет'}</p>`: '';
     return `
       <section class="card">
         <h2>Глава завершена. Выход из города.</h2>
-        <p>Дорога: <strong>${ROAD_LABELS[bestRoad]}</strong> (${state.road[bestRoad]}).</p>
+        <p>Ты выходишь на дорогу: <strong>${ROAD_LABELS[bestRoad]}</strong> (${state.road[bestRoad]}).</p>
         <p class="small">Гроши: ${state.coins} · Отношения: ${relations}</p>
-        <p class="small">Доступ: ${state.access.join(', ') || 'нет'} · Обязательства: ${state.obligations.join(', ') || 'нет'}</p>
+        <p class="small">Обязательства: ${state.obligations.join(', ') || 'нет'}</p>
+        ${accessLine}
         <p class="muted">Шанталь ${state.chantal === 'away'? 'отлучалась': state.chantal === 'return'? 'вернулась и оглянулась на город': 'осталась рядом'}.</p>
       </section>`;
   }
